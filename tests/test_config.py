@@ -44,6 +44,7 @@ def test_is_configured_when_all_set():
             grok_sso_cookie="x",
             grok_sso_rw_cookie="y",
             challenge_header_hex="00" * 49,
+            grok_cf_clearance="cf-token",
             _env_file=None,
         )
         assert s.is_configured is True

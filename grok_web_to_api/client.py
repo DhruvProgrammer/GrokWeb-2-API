@@ -57,13 +57,26 @@ class GrokClient:
     """Async client wrapping grok.com's web API."""
 
     def __init__(self, settings: Settings, signer: ChallengeSigner):
+        import os
         self._settings = settings
         self._signer = signer
         # Connection pool sized for typical single-user proxy use.
         # raise_app=False so we can decide ourselves how to surface errors.
+        # Honor the standard CA-bundle env vars so the client works on
+        # sandboxes that intercept TLS with their own CA (Aliyun, Azure,
+        # k8s service-mesh sidecars, etc.) without forcing verify=False.
+        verify: bool | str = True
+        ca_bundle = (
+            os.environ.get("SSL_CERT_FILE")
+            or os.environ.get("REQUESTS_CA_BUNDLE")
+            or os.environ.get("CURL_CA_BUNDLE")
+        )
+        if ca_bundle:
+            verify = ca_bundle
         self._http = httpx.AsyncClient(
             timeout=httpx.Timeout(settings.request_timeout, connect=10.0),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            verify=verify,
         )
 
     async def aclose(self) -> None:
@@ -181,6 +194,18 @@ class GrokClient:
 
     def _base_headers(self) -> dict:
         """Headers required by grok.com's web client to accept the request."""
+        # Build the Cookie header. Cloudflare's cf_clearance is what gets
+        # us past the "Just a moment..." challenge; cf_bm is the per-session
+        # bot-management token. Both expire (~30 min) so the user must
+        # refresh by reloading grok.com in a real browser periodically.
+        cookie_parts = [
+            f"sso={self._settings.grok_sso_cookie}",
+            f"sso-rw={self._settings.grok_sso_rw_cookie}",
+        ]
+        if self._settings.grok_cf_clearance:
+            cookie_parts.append(f"cf_clearance={self._settings.grok_cf_clearance}")
+        if self._settings.grok_cf_bm:
+            cookie_parts.append(f"__cf_bm={self._settings.grok_cf_bm}")
         return {
             "content-type": "application/json",
             "accept": "text/event-stream",
@@ -189,8 +214,5 @@ class GrokClient:
             "user-agent": self._settings.grok_user_agent,
             "x-statsig-id": self._signer.sign(),
             "x-xai-request-id": _new_request_id(),
-            "cookie": (
-                f"sso={self._settings.grok_sso_cookie}; "
-                f"sso-rw={self._settings.grok_sso_rw_cookie}"
-            ),
+            "cookie": "; ".join(cookie_parts),
         }

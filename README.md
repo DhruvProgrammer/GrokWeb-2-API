@@ -46,25 +46,64 @@ uvicorn main:app --host 0.0.0.0 --port 4982
 
 > **Keep these values secret.** They give anyone with them full access to your xAI account quota.
 
-1. **Grab the SSO cookies**
-   - Open https://grok.com and sign in.
-   - Open DevTools (`F12`) → **Application** (Chrome/Edge) or **Storage** (Firefox).
-   - Expand **Cookies** → `https://grok.com`.
-   - Copy the **Value** of `sso` → `GROK_SSO_COOKIE`.
-   - Copy the **Value** of `sso-rw` → `GROK_SSO_RW_COOKIE`.
-   - Both rows usually hold the same JWT.
+### Option A: One-click wizard (recommended) ⭐
 
-2. **Extract the anti-bot challenge**
-   - On https://grok.com, open DevTools → **Console**.
-   - Paste the contents of [`scripts/extract-challenge.js`](scripts/extract-challenge.js).
-   - Press Enter; the script prints three lines:
+The new `scripts/extract-everything.py` opens a stealth browser, walks you through sign-in, captures the cookies, decodes the challenge, and writes `.env` automatically. It even runs a smoke test at the end.
+
+```bash
+# One-time install of the stealth browser
+./scripts/install-cloakbrowser.sh
+
+# Run the wizard — it opens a browser, you sign in, .env gets written
+python3 scripts/extract-everything.py
+```
+
+What the wizard does:
+1. Launches CloakBrowser (stealth Chromium) so Cloudflare treats you as a real user
+2. Polls the browser's cookies every 2s — once `sso` + `sso-rw` + `cf_clearance` all appear, it knows you're signed in
+3. Sends a throwaway "ping" message to capture the `x-statsig-id` header
+4. Decodes the 70-byte header into `CHALLENGE_HEADER_HEX` (49 bytes) + `CHALLENGE_TRAILER` (1 byte)
+5. Atomically writes `.env` with `chmod 600`
+6. Runs a smoke test (start server, hit `/health`, kill server)
+
+CLI options:
+```
+--env-file PATH    Where to write .env (default: .env)
+--no-smoke         Skip the smoke test
+--login-timeout S  Seconds to wait for login (default: 600)
+--challenge-timeout S  Seconds to wait for x-statsig-id (default: 60)
+--test             Run without a browser (for CI / dry-run)
+```
+
+The wizard handles every edge case we hit while building this:
+- `cf_clearance` missing → blocks until it appears
+- `x-statsig-id` not captured within timeout → clear error message
+- User cancels with Ctrl-C → clean exit, no .env written
+- Any uncaught exception → exception type in the error output
+
+### Option B: Manual extraction (works on a headless server)
+
+If you're on a server without a display and don't want to use the wizard:
+
+1. **Grab the SSO cookies** in a real desktop browser:
+   - Open https://grok.com and sign in.
+   - Open DevTools (`F12`) → **Application** → **Cookies** → `https://grok.com`.
+   - Copy the **Value** of `sso` → `GROK_SSO_COOKIE`
+   - Copy the **Value** of `sso-rw` → `GROK_SSO_RW_COOKIE`
+   - Copy the **Value** of `cf_clearance` → `GROK_CF_CLEARANCE` (required!)
+   - Copy the **Value** of `__cf_bm` → `GROK_CF_BM` (optional, helps)
+
+2. **Extract the anti-bot challenge** with the same browser:
+   - Open DevTools → **Console**
+   - Paste the contents of [`scripts/extract-challenge.js`](scripts/extract-challenge.js)
+   - Press Enter; the script prints:
      ```
      CHALLENGE_HEADER_HEX=<98 hex chars>
      CHALLENGE_SUFFIX=<string>
      CHALLENGE_TRAILER=<digit 0-9>
      ```
-   - Copy all three into `.env`.
-   - Re-run whenever Grok ships a new web build (the challenge rotates).
+   - Copy all three into `.env`
+   - Re-run whenever Grok ships a new web build (the challenge rotates)
 
 3. **Fill the rest of `.env`** (defaults are fine for most users):
    ```
@@ -277,5 +316,4 @@ MIT — see [LICENSE](LICENSE).
 This project reverse-engineers xAI's web API. It is not affiliated with
 or endorsed by xAI. Use of this project may violate xAI's Terms of
 Service. The authors are not responsible for any account actions xAI
-may take as a result.#   G r o k W e b - 2 - A P I  
- 
+may take as a result.

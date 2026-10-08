@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     # Cookie auth (required).
     grok_sso_cookie: str = ""
     grok_sso_rw_cookie: str = ""
+    # Cloudflare clearance (required for non-browser requests).
+    # cf_clearance is the post-challenge token; cf_bm is the bot-mgmt cookie.
+    # Both expire (cf_clearance ~30min, cf_bm ~30min) and need to be refreshed
+    # by re-loading grok.com in a browser.
+    grok_cf_clearance: str = ""
+    grok_cf_bm: str = ""
 
     # Anti-bot challenge (required).
     challenge_header_hex: str = ""
@@ -69,7 +75,12 @@ class Settings(BaseSettings):
     @property
     def is_configured(self) -> bool:
         """True when the minimum required auth is set."""
-        return bool(self.grok_sso_cookie and self.grok_sso_rw_cookie and self.challenge_header_hex)
+        return bool(
+            self.grok_sso_cookie
+            and self.grok_sso_rw_cookie
+            and self.challenge_header_hex
+            and self.grok_cf_clearance
+        )
 
     @property
     def missing_fields(self) -> List[str]:
@@ -81,6 +92,8 @@ class Settings(BaseSettings):
             out.append("GROK_SSO_RW_COOKIE")
         if not self.challenge_header_hex:
             out.append("CHALLENGE_HEADER_HEX")
+        if not self.grok_cf_clearance:
+            out.append("GROK_CF_CLEARANCE")
         return out
 
 
